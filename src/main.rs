@@ -29,7 +29,7 @@ async fn index(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, E
 }
 
 async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
+    HttpResponse::Ok().body("Hey there?")
 }
 
 #[actix_web::main]
