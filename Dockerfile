@@ -7,7 +7,7 @@ WORKDIR /usr
 COPY . ./src/app
 
 # Install production dependencies and build a release artifact.
-RUN cargo install --path .
+RUN cargo install --path ./src/app
 
 # Run the web service on container startup.
 CMD ["rust-server"]
