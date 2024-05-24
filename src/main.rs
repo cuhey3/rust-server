@@ -1,40 +1,61 @@
-use actix::{Actor, StreamHandler};
-use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
-use actix_web_actors::ws;
+//! Multi-room WebSocket chat server.
+//!
+//! Open `http://localhost:8080/` in browser to test.
+
+use actix_files::NamedFile;
+use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use std::env;
+use tokio::{
+    task::{spawn, spawn_local},
+    try_join,
+};
 
-/// Define HTTP actor
-struct MyWs;
+mod handler;
+mod server;
 
-impl Actor for MyWs {
-    type Context = ws::WebsocketContext<Self>;
+pub use self::server::{ChatServer, ChatServerHandle};
+
+/// Connection ID.
+pub type ConnId = usize;
+
+/// Room ID.
+pub type RoomId = String;
+
+/// Message sent to a room/client.
+pub type Msg = String;
+
+async fn index() -> impl Responder {
+    NamedFile::open_async("./static/index.html").await.unwrap()
 }
 
-/// Handler for ws::Message message
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for MyWs {
-    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        match msg {
-            Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
-            Ok(ws::Message::Text(text)) => ctx.text(text),
-            Ok(ws::Message::Binary(bin)) => ctx.binary(bin),
-            _ => (),
-        }
-    }
+/// Handshake and start WebSocket handler with heartbeats.
+async fn chat_ws(
+    req: HttpRequest,
+    stream: web::Payload,
+    chat_server: web::Data<ChatServerHandle>,
+) -> Result<HttpResponse, Error> {
+    let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
+
+    // spawn websocket handler (and don't await it) so that the response is returned immediately
+    spawn_local(handler::chat_ws(
+        (**chat_server).clone(),
+        session,
+        msg_stream,
+    ));
+
+    Ok(res)
 }
 
-async fn index(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error> {
-    let resp = ws::start(MyWs {}, &req, stream);
-    println!("{:?}", resp);
-    resp
-}
-
-async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there?")
-}
-
-#[actix_web::main]
+// note that the `actix` based WebSocket handling would NOT work under `tokio::main`
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
-    pretty_env_logger::init();
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
+    log::info!("starting HTTP server at http://localhost:8080");
+
+    let (chat_server, server_tx) = ChatServer::new();
+
+    let chat_server = spawn(chat_server.run());
 
     let mut port: u16 = 8080;
     match env::var("PORT") {
@@ -48,10 +69,21 @@ async fn main() -> std::io::Result<()> {
         }
         Err(_e) => {}
     };
-    HttpServer::new(|| App::new()
-        .route("/", web::get().to(manual_hello))
-        .route("/ws/", web::get().to(index)))
-        .bind(("0.0.0.0", port))?
-        .run()
-        .await
+    let http_server = HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(server_tx.clone()))
+            // WebSocket UI HTML file
+            .service(web::resource("/").to(index))
+            // websocket routes
+            .service(web::resource("/ws").route(web::get().to(chat_ws)))
+            // enable logger
+            .wrap(middleware::Logger::default())
+    })
+    .workers(2)
+    .bind(("0.0.0.0", port))?
+    .run();
+
+    try_join!(http_server, async move { chat_server.await.unwrap() })?;
+
+    Ok(())
 }
