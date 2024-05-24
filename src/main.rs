@@ -2,6 +2,7 @@
 //!
 //! Open `http://localhost:8080/` in browser to test.
 
+use actix_files as fs;
 use actix_files::NamedFile;
 use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use std::env;
@@ -9,7 +10,6 @@ use tokio::{
     task::{spawn, spawn_local},
     try_join,
 };
-use actix_files as fs;
 
 mod handler;
 mod server;
