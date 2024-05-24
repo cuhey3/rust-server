@@ -87,7 +87,7 @@ fn start_websocket() -> Result<(), JsValue> {
             fr.read_as_array_buffer(&blob).expect("blob not readable");
             onloadend_cb.forget();
         } else if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
-            console_log!("message event, received Text: {:?}", txt);
+            //console_log!("message event, received Text: {:?}", txt);
         } else {
             console_log!("message event, received Unknown: {:?}", e.data());
         }
