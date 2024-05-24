@@ -6,14 +6,8 @@ FROM rust:1.78
 WORKDIR /usr/src/app
 COPY . .
 
-RUN cd ./my-wasm
-RUN cargo install wasm-pack
-RUN wasm-pack build --target web
-
-RUN cd ../
-
 # Install production dependencies and build a release artifact.
-RUN cargo install --path .
+RUN cd ./my-wasm && cargo install wasm-pack && wasm-pack build --target web && cd ../ && cargo install --path .
 
 # Run the web service on container startup.
 CMD ["rust-server"]
