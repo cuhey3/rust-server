@@ -194,5 +194,10 @@
     updateConnectionStatus()
 
 </script>
+<script type="module">
+    import init, { greet } from "./wasm/pkg/my_wasm.js";
+    await init();
+    greet("WebAssembly");
+    </script>
 </body>
 </html>

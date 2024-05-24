@@ -2,6 +2,10 @@
 # https://hub.docker.com/_/rust
 FROM rust:1.78
 
+WORKDIR /usr/src/app/my-wasm
+RUN cargo install wasm-pack
+RUN wasm-pack build --target web
+
 # Copy local code to the container image.
 WORKDIR /usr/src/app
 COPY . .

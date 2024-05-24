@@ -9,6 +9,7 @@ use tokio::{
     task::{spawn, spawn_local},
     try_join,
 };
+use actix_files as fs;
 
 mod handler;
 mod server;
@@ -73,6 +74,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(server_tx.clone()))
             // WebSocket UI HTML file
+            .service(fs::Files::new("/wasm", "my-wasm/").show_files_listing())
             .service(web::resource("/").to(index))
             // websocket routes
             .service(web::resource("/ws").route(web::get().to(chat_ws)))
