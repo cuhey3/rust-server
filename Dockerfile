@@ -6,7 +6,7 @@ FROM rust:1.78
 WORKDIR /usr/src/app
 COPY . .
 
-RUN cd wasm-pack
+RUN cd ./my-wasm
 RUN cargo install wasm-pack
 RUN wasm-pack build --target web
 
