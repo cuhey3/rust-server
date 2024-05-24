@@ -3,6 +3,8 @@
 FROM rust:1.78
 
 WORKDIR /usr/src/app/my-wasm
+COPY . .
+
 RUN cargo install wasm-pack
 RUN wasm-pack build --target web
 
