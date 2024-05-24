@@ -2,15 +2,15 @@
 # https://hub.docker.com/_/rust
 FROM rust:1.78
 
-WORKDIR /usr/src/app/my-wasm
-COPY . .
-
-RUN cargo install wasm-pack
-RUN wasm-pack build --target web
-
 # Copy local code to the container image.
 WORKDIR /usr/src/app
 COPY . .
+
+RUN cd wasm-pack
+RUN cargo install wasm-pack
+RUN wasm-pack build --target web
+
+RUN cd ../
 
 # Install production dependencies and build a release artifact.
 RUN cargo install --path .
