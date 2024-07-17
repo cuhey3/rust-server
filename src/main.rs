@@ -18,6 +18,7 @@ use axum::{
 use futures::{sink::SinkExt, stream::StreamExt};
 use std::{
     collections::HashSet,
+    env,
     sync::{Arc, Mutex},
 };
 use tokio::sync::broadcast;
@@ -51,8 +52,19 @@ async fn main() {
         .route("/", get(index))
         .route("/ws", get(websocket_handler))
         .with_state(app_state);
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
+    let mut port: u16 = 8080;
+    match env::var("PORT") {
+        Ok(p) => {
+            match p.parse::<u16>() {
+                Ok(n) => {
+                    port = n;
+                }
+                Err(_e) => {}
+            };
+        }
+        Err(_e) => {}
+    };
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .unwrap();
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
