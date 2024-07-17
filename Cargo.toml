@@ -4,16 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-actix = { version = "0.13.3" }
-actix-web = "4"
-actix-web-actors = "4.3.0"
-pretty_env_logger = "0.5.0"
-tokio = { version = "1.24.2", features = ["sync", "io-util", "rt", "time", "macros"] }
-env_logger = "0.11.3"
-log = "0.4.21"
-actix-files = "0.6"
-futures-util = { version = "0.3.17", default-features = false, features = ["std"] }
-actix-ws = "0.2.5"
-rand = "0.8"
+axum = { features = ["ws"] }
+futures = "0.3"
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.4", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

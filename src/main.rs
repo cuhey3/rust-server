@@ -1,91 +1,147 @@
-//! Multi-room WebSocket chat server.
+//! Example chat application.
 //!
-//! Open `http://localhost:8080/` in browser to test.
+//! Run with
+//!
+//! ```not_rust
+//! cargo run -p example-chat
+//! ```
 
-use actix_files as fs;
-use actix_files::NamedFile;
-use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
-use std::env;
-use tokio::{
-    task::{spawn, spawn_local},
-    try_join,
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
+    response::{Html, IntoResponse},
+    routing::get,
+    Router,
 };
+use futures::{sink::SinkExt, stream::StreamExt};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
+use tokio::sync::broadcast;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod handler;
-mod server;
-
-pub use self::server::{ChatServer, ChatServerHandle};
-
-/// Connection ID.
-pub type ConnId = usize;
-
-/// Room ID.
-pub type RoomId = String;
-
-/// Message sent to a room/client.
-pub type Msg = String;
-
-async fn index() -> impl Responder {
-    NamedFile::open_async("./static/index.html").await.unwrap()
+// Our shared state
+struct AppState {
+    // We require unique usernames. This tracks which usernames have been taken.
+    user_set: Mutex<HashSet<String>>,
+    // Channel used to send messages to all connected clients.
+    tx: broadcast::Sender<String>,
 }
 
-/// Handshake and start WebSocket handler with heartbeats.
-async fn chat_ws(
-    req: HttpRequest,
-    stream: web::Payload,
-    chat_server: web::Data<ChatServerHandle>,
-) -> Result<HttpResponse, Error> {
-    let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "example_chat=trace".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
-    // spawn websocket handler (and don't await it) so that the response is returned immediately
-    spawn_local(handler::chat_ws(
-        (**chat_server).clone(),
-        session,
-        msg_stream,
-    ));
+    // Set up application state for use with with_state().
+    let user_set = Mutex::new(HashSet::new());
+    let (tx, _rx) = broadcast::channel(100);
 
-    Ok(res)
+    let app_state = Arc::new(AppState { user_set, tx });
+
+    let app = Router::new()
+        .route("/", get(index))
+        .route("/ws", get(websocket_handler))
+        .with_state(app_state);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
+        .await
+        .unwrap();
+    tracing::debug!("listening on {}", listener.local_addr().unwrap());
+    axum::serve(listener, app).await.unwrap();
 }
 
-// note that the `actix` based WebSocket handling would NOT work under `tokio::main`
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> std::io::Result<()> {
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| websocket(socket, state))
+}
 
-    log::info!("starting HTTP server at http://localhost:8080");
+// This function deals with a single websocket connection, i.e., a single
+// connected client / user, for which we will spawn two independent tasks (for
+// receiving / sending chat messages).
+async fn websocket(stream: WebSocket, state: Arc<AppState>) {
+    // By splitting, we can send and receive at the same time.
+    let (mut sender, mut receiver) = stream.split();
 
-    let (chat_server, server_tx) = ChatServer::new();
-
-    let chat_server = spawn(chat_server.run());
-
-    let mut port: u16 = 8080;
-    match env::var("PORT") {
-        Ok(p) => {
-            match p.parse::<u16>() {
-                Ok(n) => {
-                    port = n;
-                }
-                Err(_e) => {}
-            };
+    // Username gets set in the receive loop, if it's valid.
+    let mut username = String::new();
+    // Loop until a text message is found.
+    while let Some(Ok(message)) = receiver.next().await {
+        if let Message::Text(name) = message {
+            break;
         }
-        Err(_e) => {}
+    }
+
+    // We subscribe *before* sending the "joined" message, so that we will also
+    // display it to our client.
+    let mut rx = state.tx.subscribe();
+
+    // Now send the "joined" message to all subscribers.
+    let msg = format!("{username} joined.");
+    tracing::debug!("{msg}");
+    let _ = state.tx.send(msg);
+
+    // Spawn the first task that will receive broadcast messages and send text
+    // messages over the websocket to our client.
+    let mut send_task = tokio::spawn(async move {
+        while let Ok(msg) = rx.recv().await {
+            // In any websocket error, break loop.
+            if sender.send(Message::Text(msg)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Clone things we want to pass (move) to the receiving task.
+    let tx = state.tx.clone();
+    let name = username.clone();
+
+    // Spawn a task that takes messages from the websocket, prepends the user
+    // name, and sends them to all broadcast subscribers.
+    let mut recv_task = tokio::spawn(async move {
+        while let Some(Ok(Message::Text(text))) = receiver.next().await {
+            // Add username before message.
+            // let _ = tx.send(format!("{name}: {text}"));
+            let _ = tx.send(text);
+        }
+    });
+
+    // If any one of the tasks run to completion, we abort the other.
+    tokio::select! {
+        _ = &mut send_task => recv_task.abort(),
+        _ = &mut recv_task => send_task.abort(),
     };
-    let http_server = HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(server_tx.clone()))
-            // WebSocket UI HTML file
-            .service(fs::Files::new("/wasm", "my-wasm/").show_files_listing())
-            .service(web::resource("/").to(index))
-            // websocket routes
-            .service(web::resource("/ws").route(web::get().to(chat_ws)))
-            // enable logger
-            .wrap(middleware::Logger::default())
-    })
-    .workers(2)
-    .bind(("0.0.0.0", port))?
-    .run();
 
-    try_join!(http_server, async move { chat_server.await.unwrap() })?;
+    // Send "user left" message (similar to "joined" above).
+    let msg = format!("{username} left.");
+    tracing::debug!("{msg}");
+    let _ = state.tx.send(msg);
 
-    Ok(())
+    // Remove username from map so new clients can take it again.
+    state.user_set.lock().unwrap().remove(&username);
+}
+
+fn check_username(state: &AppState, string: &mut String, name: &str) {
+    let mut user_set = state.user_set.lock().unwrap();
+
+    if !user_set.contains(name) {
+        user_set.insert(name.to_owned());
+
+        string.push_str(name);
+    }
+}
+
+// Include utf-8 file at **compile** time.
+async fn index() -> Html<&'static str> {
+    Html(std::include_str!("../static/index.html"))
 }
