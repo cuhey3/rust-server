@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Chat!</title>
+    <title>マウスイベントを使ったお絵かき</title>
 
     <style>
         :root {
@@ -17,7 +17,7 @@
 
         #log {
             width: 30em;
-            height: 20em;
+            height: 10em;
             overflow: auto;
             margin: 0.5em 0;
 
@@ -62,8 +62,6 @@
 <body>
 <h1>マウスイベントを使ったお絵かき</h1>
 <canvas id="myPics" width="560" height="360"></canvas>
-<h1>Chat!</h1>
-
 <div>
     <button id="connect">Connect</button>
     <span>Status:</span>
@@ -72,49 +70,10 @@
 
 <div id="log"></div>
 
-<form id="chatform">
-    <input type="text" id="text" />
-    <input type="submit" id="send" />
-</form>
-
-<hr />
-
-<section>
-    <h2>Commands</h2>
-    <table style="border-spacing: 0.5em">
-        <tr>
-            <td>
-                <code>/list</code>
-            </td>
-            <td>list all available rooms</td>
-        </tr>
-        <tr>
-            <td>
-                <code>/join name</code>
-            </td>
-            <td>join room, if room does not exist, create new one</td>
-        </tr>
-        <tr>
-            <td>
-                <code>/name name</code>
-            </td>
-            <td>set session name</td>
-        </tr>
-        <tr>
-            <td>
-                <code>some message</code>
-            </td>
-            <td>just string, send message to all peers in same room</td>
-        </tr>
-    </table>
-</section>
-
 <script>
     const $status = document.querySelector('#status')
     const $connectButton = document.querySelector('#connect')
     const $log = document.querySelector('#log')
-    const $form = document.querySelector('#chatform')
-    const $input = document.querySelector('#text')
 
     /** @type {WebSocket | null} */
     let socket = null
@@ -137,18 +96,14 @@
 
         socket.onopen = () => {
             log('Connected')
+            socket.send(JSON.stringify({user_name: 'guest', channel_name:'paint'}));
             updateConnectionStatus()
-
-            // function foo() {
-            //     socket.send("bar");
-            //     window.requestAnimationFrame(foo);
-            // }
-            // foo();
         }
 
         socket.onmessage = (ev) => {
-            drawLine(context, ...ev.data.split(','));
-            // log('Received: ' + ev.data, 'message')
+            const rawData = JSON.parse(ev.data);
+            const positionData = rawData.message;
+            drawLine(context, ...positionData.split(','));
         }
 
         socket.onclose = () => {
@@ -174,7 +129,6 @@
             $status.style.color = 'green'
             $status.textContent = `connected`
             $connectButton.innerHTML = 'Disconnect'
-            $input.focus()
         } else {
             $status.style.backgroundColor = 'red'
             $status.style.color = 'white'
@@ -191,18 +145,6 @@
         }
 
         updateConnectionStatus()
-    })
-
-    $form.addEventListener('submit', (ev) => {
-        ev.preventDefault()
-
-        const text = $input.value
-
-        log('Sending: ' + text)
-        socket.send(text)
-
-        $input.value = ''
-        $input.focus()
     })
 
     updateConnectionStatus()
@@ -226,7 +168,6 @@
     myPics.addEventListener("mousemove", (e) => {
         if (isDrawing) {
             sendLine(x, y, e.offsetX, e.offsetY);
-            // drawLine(context, x, y, e.offsetX, e.offsetY);
             x = e.offsetX;
             y = e.offsetY;
         }
@@ -235,7 +176,6 @@
     window.addEventListener("mouseup", (e) => {
         if (isDrawing) {
             sendLine(x, y, e.offsetX, e.offsetY);
-            // drawLine(context, x, y, e.offsetX, e.offsetY);
             x = 0;
             y = 0;
             isDrawing = false;
@@ -257,10 +197,5 @@
         }
     }
 </script>
-<script type="module">
-    import init, { greet } from "./wasm/pkg/my_wasm.js";
-    await init();
-    greet("WebAssembly");
-    </script>
 </body>
 </html>
